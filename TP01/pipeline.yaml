@@ -1,0 +1,31 @@
+stages:
+  - create
+  - test
+  - build
+  - deploy
+
+jobs:
+  create_job:
+    stage: create
+    script:
+      - dotnet new console -o DemoApp --force
+      - dotnet new xunit -o Demo.Tests --force
+
+  test_job:
+    stage: test
+    script:
+      - dotnet test Demo.Tests/Demo.Tests.csproj --logger "trx;LogFileName=test_results.trx"
+      - mkdir -p output
+      - cp Demo.Tests/TestResults/test_results.trx output/ || true
+      - echo "✅ Tests exécutés avec succès" > output/test_result.txt
+
+  build_job:
+    stage: build
+    script:
+      - dotnet build DemoApp/DemoApp.csproj -c Release -o output/
+      - echo "🚀 Build terminé" > output/build_artifact.txt
+
+  deploy_job:
+    stage: deploy
+    script:
+      - dotnet run --project DemoApp/DemoApp.csproj

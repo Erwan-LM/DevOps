@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="94a2792b-54e8-4c25-aa13-65441bffd181" name="@codespaces-e34348 2025-09-01 12:57:58" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2025-09-01T12:57:58.3333192+00:00" queuing="2025-09-01T12:57:58.3333193+00:00" start="2025-09-01T12:57:57.6927386+00:00" finish="2025-09-01T12:57:58.3397692+00:00" />
+  <TestSettings name="default" id="c732e953-893b-4630-b491-0c5fd29596a4">
+    <Deployment runDeploymentRoot="_codespaces-e34348_2025-09-01_12_57_58" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="d4aa633e-d289-4ebf-95f7-8936137299a5" testId="d7647176-b94b-3de1-6991-02ed7223fdb6" testName="Demo.Tests.UnitTest1.Test1" computerName="codespaces-e34348" duration="00:00:00.0018846" startTime="2025-09-01T12:57:58.2302654+00:00" endTime="2025-09-01T12:57:58.2303055+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d4aa633e-d289-4ebf-95f7-8936137299a5" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Demo.Tests.UnitTest1.Test1" storage="/workspaces/devops/tp01/demo.tests/bin/debug/net8.0/demo.tests.dll" id="d7647176-b94b-3de1-6991-02ed7223fdb6">
+      <Execution id="d4aa633e-d289-4ebf-95f7-8936137299a5" />
+      <TestMethod codeBase="/workspaces/DevOps/TP01/Demo.Tests/bin/Debug/net8.0/Demo.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Demo.Tests.UnitTest1" name="Test1" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="d7647176-b94b-3de1-6991-02ed7223fdb6" executionId="d4aa633e-d289-4ebf-95f7-8936137299a5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.5.3.1+6b60a9e56a (64-bit .NET 8.0.18)
+[xUnit.net 00:00:00.06]   Discovering: Demo.Tests
+[xUnit.net 00:00:00.09]   Discovered:  Demo.Tests
+[xUnit.net 00:00:00.09]   Starting:    Demo.Tests
+[xUnit.net 00:00:00.15]   Finished:    Demo.Tests
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

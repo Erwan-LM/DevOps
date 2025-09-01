@@ -1,0 +1,15 @@
+/workspaces/DevOps/TP01/output/DemoApp
+/workspaces/DevOps/TP01/output/DemoApp.deps.json
+/workspaces/DevOps/TP01/output/DemoApp.runtimeconfig.json
+/workspaces/DevOps/TP01/output/DemoApp.dll
+/workspaces/DevOps/TP01/output/DemoApp.pdb
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.GeneratedMSBuildEditorConfig.editorconfig
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.AssemblyInfoInputs.cache
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.AssemblyInfo.cs
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.csproj.CoreCompileInputs.cache
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.sourcelink.json
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.dll
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/refint/DemoApp.dll
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.pdb
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/DemoApp.genruntimeconfig.cache
+/workspaces/DevOps/TP01/DemoApp/obj/Release/net8.0/ref/DemoApp.dll
