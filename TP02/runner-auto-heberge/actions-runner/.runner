@@ -1,0 +1,11 @@
+﻿{
+  "agentId": 21,
+  "agentName": "171SE34-JTGMX53",
+  "poolId": 1,
+  "poolName": "Default",
+  "serverUrl": "https://pipelinesghubeus14.actions.githubusercontent.com/EFgZ81PSQ5azumpRjFcf2XlL8W2JM318kTRLA853OQXgSTLLGZ/",
+  "gitHubUrl": "https://github.com/Octopus-Training-And-Dev/tp-cr-ation-du-d-p-t-github-premier-pipeline-ci-Erwan-LM",
+  "workFolder": "_work",
+  "useV2Flow": true,
+  "serverUrlV2": "https://broker.actions.githubusercontent.com/"
+}
