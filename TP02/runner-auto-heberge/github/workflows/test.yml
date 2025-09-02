@@ -1,0 +1,8 @@
+name: Test Runner
+on: [push]
+jobs:
+  run-test:
+    runs-on: self-hosted
+    steps:
+      - name: Message de test
+        run: echo "✅ Job exécuté depuis le runner auto-hébergé"

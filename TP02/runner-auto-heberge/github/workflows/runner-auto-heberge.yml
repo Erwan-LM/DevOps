@@ -1,0 +1,62 @@
+name: Runner Auto-Hébergé Windows
+on: [push]
+
+jobs:
+  run-test:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Message de test
+        run: echo "✅ Job exécuté depuis le runner auto-hébergé Windows"
+        shell: cmd
+        
+      - name: Informations système
+        run: |
+          echo "Hostname: %COMPUTERNAME%"
+          echo "Utilisateur: %USERNAME%"
+          echo "Date/Heure: %date% %time%"
+          ver
+        shell: cmd
+
+  test-avec-artefact:
+    runs-on: self-hosted
+    needs: run-test
+    steps:
+      - name: Créer un fichier de sortie
+        run: |
+          if not exist output mkdir output
+          echo === RAPPORT RUNNER WINDOWS === > output\test.txt
+          echo Date de generation: %date% %time% >> output\test.txt
+          echo Hostname: %COMPUTERNAME% >> output\test.txt
+          echo Utilisateur: %USERNAME% >> output\test.txt
+          echo Repertoire de travail: %CD% >> output\test.txt
+          echo === FIN RAPPORT === >> output\test.txt
+        shell: cmd
+        
+      - name: Afficher le contenu créé
+        run: |
+          echo "=== Contenu du fichier généré ==="
+          type output\test.txt
+        shell: cmd
+        
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-runner-windows
+          path: output\test.txt
+          retention-days: 1
+
+  test-erreur:
+    runs-on: self-hosted
+    needs: run-test
+    continue-on-error: true
+    steps:
+      - name: Commande qui va échouer
+        run: dir dossier_qui_n_existe_pas
+        shell: cmd
+        
+      - name: Cette étape ne s'exécutera pas
+        run: echo "Cette ligne ne devrait jamais apparaître"
+        shell: cmd
