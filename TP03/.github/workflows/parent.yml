@@ -1,17 +1,52 @@
 name: Parent Workflow
 
 on:
-  workflow_dispatch: # déclenchable manuellement
+  workflow_dispatch:
+    inputs:
+      user_name:
+        description: "Nom de l'utilisateur"
+        required: true
+        default: "Charlie"
+      moment:
+        description: "Moment de la journée (morning, evening, day)"
+        required: false
+        default: "day"
 
 jobs:
-  call-child-morning:
+  call-child:
     uses: ./.github/workflows/child.yml
     with:
-      name: "Alice"
-      time: "morning"
+      name: ${{ inputs.user_name }}
+      time: ${{ inputs.moment }}
 
-  call-child-evening:
-    uses: ./.github/workflows/child.yml
-    with:
-      name: "Bob"
-      time: "evening"
+  display-output:
+    runs-on: ubuntu-latest
+    needs: call-child
+    steps:
+      - run: echo "🔔 Message renvoyé par l’enfant : ${{ needs.call-child.outputs.greeting-message }}"
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore DemoApp/DemoApp.csproj
+
+      - name: Build project
+        run: dotnet build DemoApp/DemoApp.csproj --no-restore --configuration Release
+
+      - name: Run tests
+        run: dotnet test DemoApp/DemoApp.csproj --no-build --verbosity normal
+
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [display-output, build-and-test]
+    steps:
+      - run: echo "🧹 Nettoyage terminé après les jobs."
