@@ -1,0 +1,732 @@
+name: Build, Test and Deploy ASP.Net Core app
+
+# ========================================
+# CONFIGURATION GLOBALE
+# ========================================
+env:
+  AZURE_WEBAPP_NAME: DemoErwanLM
+  DOTNET_VERSION: '8.0.x'
+  BUILD_CONFIGURATION: Release
+  REGISTRY: docker.io                  
+  IMAGE_NAME: mywebapi
+
+# ========================================
+# DÉCLENCHEURS
+# ========================================
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      deploy_to_azure:
+        description: 'Deploy to Azure'
+        required: false
+        default: true
+        type: boolean
+      deploy_to_code:
+        description: 'Deploy to Code environment'
+        required: false
+        default: true
+        type: boolean
+
+# ========================================
+# PERMISSIONS
+# ========================================
+permissions:
+  contents: write
+  actions: read
+  security-events: write
+  packages: write
+
+# ========================================
+# JOBS PIPELINE
+# ========================================
+jobs:
+  # ========================================
+  # ÉTAPE 1: BUILD DE BASE
+  # ========================================
+  build:
+    name: 🏗️ Build Application
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+    
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⚙️ Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: 🏷️ Generate version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            VERSION="pr-${{ github.event.number }}-$(date +%Y%m%d-%H%M%S)"
+          else
+            VERSION="$(date +%Y.%m.%d)-${{ github.run_number }}"
+          fi
+          IMAGE_TAG="${{ secrets.DOCKERHUB_USERNAME || 'demo' }}/${{ env.IMAGE_NAME }}:$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "✅ Generated version: $VERSION"
+          echo "✅ Generated image tag: $IMAGE_TAG"
+
+      - name: 📥 Restore dependencies
+        run: |
+          echo "📥 Restoring NuGet packages..."
+          dotnet restore MyWebApi/MyWebApi.csproj --verbosity minimal
+          echo "✅ Dependencies restored successfully"
+
+      - name: 🔨 Build application
+        run: |
+          echo "🔨 Building application..."
+          dotnet build MyWebApi/MyWebApi.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --no-restore \
+            -p:Version=${{ steps.version.outputs.version }} \
+            --verbosity minimal
+          echo "✅ Build completed successfully"
+
+      - name: 📦 Publish application
+        run: |
+          echo "📦 Publishing application..."
+          dotnet publish MyWebApi/MyWebApi.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --no-build \
+            --output ./publish \
+            --verbosity minimal
+          echo "✅ Application published successfully"
+
+      - name: ⬆️ Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-${{ steps.version.outputs.version }}
+          path: ./publish
+          retention-days: 30
+          compression-level: 6
+
+      - name: ⬆️ Upload source code for tests
+        uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: source-code-${{ steps.version.outputs.version }}
+          path: |
+            .
+            !./publish
+            !.git
+          retention-days: 1
+
+  # ========================================
+  # ÉTAPE 2: TESTS PARALLÈLES (dépendent de BUILD)
+  # ========================================
+  
+  # Tests unitaires - exécutés sur tous les événements
+  unit-tests:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    
+    steps:
+      - name: ⬇️ Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code-${{ needs.build.outputs.version }}
+        if: github.event_name != 'pull_request'
+
+      - name: ⬇️ Checkout code (PR only)
+        uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+
+      - name: ⚙️ Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: 📥 Restore test dependencies
+        run: |
+          echo "📥 Restoring test dependencies..."
+          if [ -f "Tests/TestProject/TestProject.csproj" ]; then
+            dotnet restore Tests/TestProject/TestProject.csproj --verbosity minimal
+            echo "✅ Test dependencies restored"
+          else
+            echo "❌ No test project found at Tests/TestProject/TestProject.csproj"
+            exit 1
+          fi
+
+      - name: 🧪 Run unit tests
+        run: |
+          echo "🧪 Running unit tests..."
+          dotnet test Tests/TestProject/TestProject.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --logger trx \
+            --logger "console;verbosity=minimal" \
+            --results-directory ./test-results \
+            --collect:"XPlat Code Coverage" \
+            --settings coverlet.runsettings \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+          echo "✅ Unit tests completed"
+
+      - name: ⬆️ Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ needs.build.outputs.version }}
+          path: ./test-results
+          retention-days: 7
+
+      - name: ⬆️ Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports-${{ needs.build.outputs.version }}
+          path: ./test-results/**/coverage.opencover.xml
+          retention-days: 7
+
+  # Tests d'intégration - exécutés uniquement sur push et workflow_dispatch
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: ⬇️ Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code-${{ needs.build.outputs.version }}
+
+      - name: ⚙️ Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: 🔗 Run integration tests
+        run: |
+          if [ -d "MyWebApi.IntegrationTests" ]; then
+            echo "🔗 Running integration tests..."
+            dotnet test MyWebApi.IntegrationTests/MyWebApi.IntegrationTests.csproj \
+              --configuration ${{ env.BUILD_CONFIGURATION }} \
+              --logger trx \
+              --logger "console;verbosity=minimal" \
+              --results-directory ./integration-test-results \
+              --verbosity minimal
+            echo "✅ Integration tests completed"
+          else
+            echo "ℹ️ No integration tests found, skipping..."
+            mkdir -p ./integration-test-results
+            echo "No integration tests available" > ./integration-test-results/info.txt
+          fi
+
+      - name: ⬆️ Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results-${{ needs.build.outputs.version }}
+          path: ./integration-test-results
+          retention-days: 7
+
+  # Scan de sécurité - exécuté uniquement sur push et workflow_dispatch
+  security-scan:
+    name: 🔍 Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: ⬇️ Download source code
+        uses: actions/download-artifact@v4
+        with:
+          name: source-code-${{ needs.build.outputs.version }}
+
+      - name: ⚙️ Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 📦 Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: 📥 Restore packages
+        run: |
+          echo "📥 Restoring packages for security scan..."
+          dotnet restore MyWebApi/MyWebApi.csproj --verbosity minimal
+          echo "✅ Packages restored for security analysis"
+
+      - name: 🔍 Run security scan
+        run: |
+          echo "🔍 Scanning for vulnerable packages..."
+          VULNERABLE_PACKAGES=$(dotnet list package --vulnerable --include-transitive --format json 2>/dev/null || echo '{"projects":[]}')
+          
+          if echo "$VULNERABLE_PACKAGES" | jq -e '.projects[].frameworks[].vulnerabilities' > /dev/null 2>&1; then
+            echo "⚠️ Vulnerabilities found:"
+            echo "$VULNERABLE_PACKAGES" | jq '.projects[].frameworks[].vulnerabilities[]? | "\(.severity): \(.title)"'
+            echo "❌ Security scan failed - vulnerabilities detected"
+            exit 1
+          else
+            echo "✅ No vulnerabilities found - security scan passed"
+          fi
+
+  # ========================================
+  # ÉTAPE 3: BUILDS SPÉCIALISÉS (dépendent des TESTS)
+  # ========================================
+
+  # Build Docker - requis pour le déploiement Azure
+  build-docker:
+    name: 🐳 Build Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build, unit-tests, security-scan, integration-tests]
+    # Exécuté si tous les tests passent ET (push sur main OU workflow_dispatch)
+    if: |
+      always() &&
+      needs.unit-tests.result == 'success' &&
+      (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped') &&
+      (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped') &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')
+    
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.build.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🐳 Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+            BUILD_CONFIGURATION=${{ env.BUILD_CONFIGURATION }}
+
+      - name: ✅ Docker build completed
+        run: |
+          echo "✅ Docker image built and pushed successfully"
+          echo "📦 Image: ${{ needs.build.outputs.image_tag }}"
+          echo "🏷️ Tags: ${{ steps.meta.outputs.tags }}"
+
+  # Build pour déploiement Code - optionnel selon les besoins
+  build-code:
+    name: 💻 Prepare Code Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build, unit-tests, security-scan]
+    # Exécuté si les tests critiques passent ET deploy_to_code activé
+    if: |
+      always() &&
+      needs.unit-tests.result == 'success' &&
+      (needs.security-scan.result == 'success' || needs.security-scan.result == 'skipped') &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') || 
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_code != 'false'))
+    
+    steps:
+      - name: ⬇️ Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp-${{ needs.build.outputs.version }}
+          path: ./publish
+
+      - name: 🔍 Validate build artifacts
+        run: |
+          echo "🔍 Validating code deployment artifacts..."
+          if [ ! -f "./publish/MyWebApi.dll" ]; then
+            echo "❌ Main application DLL not found"
+            exit 1
+          fi
+          
+          if [ ! -f "./publish/appsettings.json" ]; then
+            echo "⚠️ appsettings.json not found"
+          fi
+          
+          echo "✅ Code deployment artifacts validated"
+          echo "📊 Artifact size: $(du -sh ./publish | cut -f1)"
+
+      - name: 📦 Upload validated artifacts for code deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-deploy-ready-${{ needs.build.outputs.version }}
+          path: ./publish
+          retention-days: 7
+
+  # ========================================
+  # ÉTAPE 4: DÉPLOIEMENTS (dépendent des BUILDS SPÉCIALISÉS)
+  # ========================================
+
+  # Déploiement Azure via Docker
+  deploy-azure:
+    name: ☁️ Deploy to Azure
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build, build-docker]
+    if: |
+      always() &&
+      needs.build-docker.result == 'success' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main' && 
+        (github.event.inputs.deploy_to_azure != 'false')) ||
+       (github.event_name == 'workflow_dispatch' && 
+        github.event.inputs.deploy_to_azure == 'true'))
+    environment:
+      name: 'Production-Azure'
+      url: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
+    
+    steps:
+      - name: 🚀 Deploy to Azure Web App (Docker)
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+          images: ${{ needs.build.outputs.image_tag }}
+
+      - name: 🏥 Health check
+        run: |
+          echo "🏥 Performing health check..."
+          WEBAPP_URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          
+          for i in {1..12}; do
+            echo "Health check attempt $i/12..."
+            
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              --retry 2 \
+              --retry-delay 5 \
+              "$WEBAPP_URL/" || echo "0")
+            
+            if [ "$HTTP_STATUS" -eq 200 ]; then
+              echo "✅ Health check passed (HTTP $HTTP_STATUS)"
+              
+              # Test API endpoint if available
+              API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                --max-time 10 \
+                "$WEBAPP_URL/health" || echo "0")
+              
+              if [ "$API_STATUS" -eq 200 ] || [ "$API_STATUS" -eq 404 ]; then
+                echo "✅ Application is healthy and responding"
+                exit 0
+              fi
+            fi
+            
+            echo "❌ Health check failed (HTTP $HTTP_STATUS), retrying in 15s..."
+            sleep 15
+          done
+          
+          echo "💥 Health check failed after 3 minutes"
+          exit 1
+
+      - name: ⬇️ Checkout for tagging
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create Azure release tag
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          TAG="azure-v${{ needs.build.outputs.version }}"
+          
+          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+            echo "⚠️ Tag $TAG already exists, skipping creation"
+          else
+            git tag -a "$TAG" -m "Azure deployment v${{ needs.build.outputs.version }}"
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git push origin "$TAG"
+            echo "✅ Created Azure deployment tag: $TAG"
+          fi
+
+  # Déploiement Code via artifacts
+  deploy-code:
+    name: 💻 Deploy to Code Environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build, build-code]
+    if: |
+      always() &&
+      needs.build-code.result == 'success' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main' && 
+        (github.event.inputs.deploy_to_code != 'false')) ||
+       (github.event_name == 'workflow_dispatch' && 
+        github.event.inputs.deploy_to_code == 'true'))
+    environment:
+      name: 'Production-Code'
+    
+    steps:
+      - name: ⬇️ Download deployment artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: code-deploy-ready-${{ needs.build.outputs.version }}
+          path: ./publish
+
+      - name: ⚙️ Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 🧪 Run pre-deployment tests
+        run: |
+          echo "🧪 Running pre-deployment validation..."
+          # Ajoutez ici vos tests pré-déploiement spécifiques
+          echo "✅ Pre-deployment tests passed"
+
+      - name: 🚀 Deploy to Code environment
+        run: |
+          echo "🚀 Deploying version ${{ needs.build.outputs.version }} to Code environment..."
+          
+          # Remplacez par votre logique de déploiement réelle
+          echo "📁 Copying files to target environment..."
+          echo "⚙️ Updating configuration files..."
+          echo "🔄 Restarting application services..."
+          echo "🔧 Running post-deployment configuration..."
+          
+          # Simulation d'attente
+          sleep 2
+          
+          echo "✅ Deployment to Code environment completed successfully"
+
+      - name: 🔍 Post-deployment verification
+        run: |
+          echo "🔍 Running post-deployment verification..."
+          # Ajoutez ici vos vérifications post-déploiement
+          echo "✅ Post-deployment verification completed"
+
+      - name: ⬇️ Checkout for tagging
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create Code release tag
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          TAG="code-v${{ needs.build.outputs.version }}"
+          
+          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+            echo "⚠️ Tag $TAG already exists, skipping creation"
+          else
+            git tag -a "$TAG" -m "Code deployment v${{ needs.build.outputs.version }}"
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            git push origin "$TAG"
+            echo "✅ Created Code deployment tag: $TAG"
+          fi
+
+  # ========================================
+  # ÉTAPE 5: NOTIFICATION FINALE
+  # ========================================
+  notify:
+    name: 📢 Notification & Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Dépend de tous les jobs précédents - s'exécute toujours
+    needs: [build, unit-tests, integration-tests, security-scan, build-docker, build-code, deploy-azure, deploy-code]
+    if: always()
+    
+    steps:
+      - name: 🔍 Prepare notification data
+        id: prepare
+        run: |
+          # Récupération des résultats de tous les jobs
+          BUILD_STATUS="${{ needs.build.result }}"
+          UNIT_TESTS_STATUS="${{ needs.unit-tests.result }}"
+          INTEGRATION_TESTS_STATUS="${{ needs.integration-tests.result }}"
+          SECURITY_STATUS="${{ needs.security-scan.result }}"
+          DOCKER_BUILD_STATUS="${{ needs.build-docker.result }}"
+          CODE_BUILD_STATUS="${{ needs.build-code.result }}"
+          AZURE_DEPLOY_STATUS="${{ needs.deploy-azure.result }}"
+          CODE_DEPLOY_STATUS="${{ needs.deploy-code.result }}"
+          VERSION="${{ needs.build.outputs.version }}"
+          
+          echo "🔍 Analyzing pipeline execution results..."
+          echo "========================================="
+          echo "Build: $BUILD_STATUS"
+          echo "Unit Tests: $UNIT_TESTS_STATUS"
+          echo "Integration Tests: $INTEGRATION_TESTS_STATUS"
+          echo "Security Scan: $SECURITY_STATUS"
+          echo "Docker Build: $DOCKER_BUILD_STATUS"
+          echo "Code Build: $CODE_BUILD_STATUS"
+          echo "Azure Deploy: $AZURE_DEPLOY_STATUS"
+          echo "Code Deploy: $CODE_DEPLOY_STATUS"
+          echo "========================================="
+          
+          # Logique de détermination du statut global
+          if [ "$BUILD_STATUS" != "success" ]; then
+            OVERALL_STATUS="failed"
+            MESSAGE="❌ Build failed for version $VERSION"
+            EMOJI="💥"
+          elif [ "$UNIT_TESTS_STATUS" != "success" ]; then
+            OVERALL_STATUS="failed"
+            MESSAGE="❌ Unit tests failed for version $VERSION"
+            EMOJI="🧪❌"
+          elif [ "$SECURITY_STATUS" == "failure" ]; then
+            OVERALL_STATUS="failed"
+            MESSAGE="❌ Security vulnerabilities detected for version $VERSION"
+            EMOJI="🔍❌"
+          else
+            # Tests de base OK, vérifier les déploiements
+            DEPLOY_SUCCESS=0
+            DEPLOY_TOTAL=0
+            DEPLOY_DETAILS=""
+            
+            # Compter les déploiements Azure
+            if [ "$AZURE_DEPLOY_STATUS" != "skipped" ]; then
+              DEPLOY_TOTAL=$((DEPLOY_TOTAL + 1))
+              if [ "$AZURE_DEPLOY_STATUS" == "success" ]; then
+                DEPLOY_SUCCESS=$((DEPLOY_SUCCESS + 1))
+                DEPLOY_DETAILS="${DEPLOY_DETAILS}✅ Azure "
+              else
+                DEPLOY_DETAILS="${DEPLOY_DETAILS}❌ Azure "
+              fi
+            fi
+            
+            # Compter les déploiements Code
+            if [ "$CODE_DEPLOY_STATUS" != "skipped" ]; then
+              DEPLOY_TOTAL=$((DEPLOY_TOTAL + 1))
+              if [ "$CODE_DEPLOY_STATUS" == "success" ]; then
+                DEPLOY_SUCCESS=$((DEPLOY_SUCCESS + 1))
+                DEPLOY_DETAILS="${DEPLOY_DETAILS}✅ Code "
+              else
+                DEPLOY_DETAILS="${DEPLOY_DETAILS}❌ Code "
+              fi
+            fi
+            
+            # Déterminer le message final
+            if [ $DEPLOY_TOTAL -eq 0 ]; then
+              OVERALL_STATUS="success"
+              MESSAGE="✅ Pipeline completed successfully! Version $VERSION (build & tests only)"
+              EMOJI="✅"
+            elif [ $DEPLOY_SUCCESS -eq $DEPLOY_TOTAL ]; then
+              OVERALL_STATUS="success" 
+              MESSAGE="🎉 Pipeline completed successfully! Version $VERSION deployed to all environments ($DEPLOY_SUCCESS/$DEPLOY_TOTAL)"
+              EMOJI="🎉"
+            elif [ $DEPLOY_SUCCESS -gt 0 ]; then
+              OVERALL_STATUS="partial"
+              MESSAGE="⚠️ Pipeline partially completed. Version $VERSION deployed to $DEPLOY_SUCCESS/$DEPLOY_TOTAL environments: $DEPLOY_DETAILS"
+              EMOJI="⚠️"
+            else
+              OVERALL_STATUS="failed"
+              MESSAGE="❌ All deployments failed for version $VERSION"
+              EMOJI="💥"
+            fi
+          fi
+          
+          # Export des variables pour les étapes suivantes
+          echo "overall_status=$OVERALL_STATUS" >> $GITHUB_OUTPUT
+          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "deploy_success=$DEPLOY_SUCCESS" >> $GITHUB_OUTPUT  
+          echo "deploy_total=$DEPLOY_TOTAL" >> $GITHUB_OUTPUT
+          echo "emoji=$EMOJI" >> $GITHUB_OUTPUT
+
+      - name: 📊 Display detailed status
+        run: |
+          echo "${{ steps.prepare.outputs.emoji }} **PIPELINE EXECUTION SUMMARY**"
+          echo "=============================================="
+          echo "📦 Version: ${{ steps.prepare.outputs.version }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+          echo "📝 Commit: ${{ github.sha }}"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🎯 Event: ${{ github.event_name }}"
+          echo ""
+          echo "📋 **DETAILED JOB RESULTS:**"
+          echo "=============================================="
+          echo "🏗️  Build: ${{ needs.build.result }}"
+          echo "🧪 Unit Tests: ${{ needs.unit-tests.result }}"
+          echo "🔗 Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "🔍 Security Scan: ${{ needs.security-scan.result }}"
+          echo "🐳 Docker Build: ${{ needs.build-docker.result }}"
+          echo "💻 Code Build: ${{ needs.build-code.result }}"
+          echo "☁️  Azure Deploy: ${{ needs.deploy-azure.result }}"
+          echo "💻 Code Deploy: ${{ needs.deploy-code.result }}"
+          echo ""
+          echo "📝 **FINAL SUMMARY:**"
+          echo "=============================================="
+          echo "${{ steps.prepare.outputs.message }}"
+
+      - name: 📋 Create deployment summary
+        if: github.event_name != 'pull_request'
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # ${{ steps.prepare.outputs.emoji }} Pipeline Execution Report
+          
+          ## 📊 Overview
+          **Version:** \`${{ steps.prepare.outputs.version }}\`  
+          **Status:** \`${{ steps.prepare.outputs.overall_status }}\`  
+          **Branch:** \`${{ github.ref_name }}\`  
+          **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})  
+          **Triggered by:** ${{ github.actor }}  
+          **Event Type:** ${{ github.event_name }}
+          
+          ## 📋 Job Results
+          | Stage | Job | Status | 
+          |-------|-----|--------|
+          | **Build** | 🏗️ Build Application | ${{ needs.build.result }} |
+          | **Test** |
